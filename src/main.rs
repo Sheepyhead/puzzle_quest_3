@@ -7,6 +7,10 @@ use bevy_egui::{
     EguiContext, EguiPlugin,
 };
 use bevy_inspector_egui::WorldInspectorPlugin;
+use heron::{
+    rapier_plugin::rapier3d::prelude::RigidBodyType, CollisionLayers, PendingConvexCollision,
+    PhysicsPlugin, RigidBody,
+};
 
 mod assets;
 
@@ -21,6 +25,7 @@ fn main() {
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugin(EguiPlugin)
         .add_plugin(WorldInspectorPlugin::default())
+        .add_plugin(PhysicsPlugin::default())
         .add_state(GameState::MainMenu)
         .add_startup_system(setup)
         .add_startup_system(load_assets)
@@ -70,13 +75,16 @@ fn main_menu(
 
 fn spawn_gems(mut commands: Commands, assets: Res<GemAssets>, gltf_assets: Res<Assets<Gltf>>) {
     let gltf = gltf_assets
-        .get(assets.meshes.get(&GemShape::Asscher).unwrap())
+        .get(assets.shatter_meshes.get(&GemShape::Asscher).unwrap())
         .unwrap();
+
     commands
         .spawn_bundle((
             Transform::from_scale(Vec3::splat(0.125)),
             GlobalTransform::default(),
             GemType::Ruby,
+            PendingConvexCollision::default(),
+            RigidBody::Dynamic,
         ))
         .with_children(|parent| {
             parent.spawn_scene(gltf.scenes[0].clone());

@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 bevy = "0.7.0"
-heron = "3.0.0"
+heron = { version = "3.0.0", features = ["3d", "collision-from-mesh"] }
 bevy_hanabi = "0.2.0"
 bevy_egui = "0.13.0"
 bevy-inspector-egui = "0.10.0"
