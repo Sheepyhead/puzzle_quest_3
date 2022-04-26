@@ -10,6 +10,8 @@ bevy = "0.7.0"
 heron = "3.0.0"
 bevy_hanabi = "0.2.0"
 bevy_egui = "0.13.0"
+bevy-inspector-egui = "0.10.0"
+strum = { version = "0.24.0", features = ["derive"] }
 
 [profile.dev]
 opt-level = 1

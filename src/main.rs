@@ -1,26 +1,43 @@
-use bevy::{app::AppExit, prelude::*};
+#![allow(clippy::type_complexity)]
+
+use assets::{load_assets, GemAssets, GemShape};
+use bevy::{app::AppExit, gltf::Gltf, prelude::*};
 use bevy_egui::{
     egui::{self, FontId, RichText},
     EguiContext, EguiPlugin,
 };
+use bevy_inspector_egui::WorldInspectorPlugin;
+
+mod assets;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .insert_resource(Msaa { samples: 4 })
+        .insert_resource(AmbientLight {
+            color: Color::ANTIQUE_WHITE,
+            brightness: 0.5,
+        })
+        .insert_resource(ClearColor(Color::BLACK))
         .add_plugin(EguiPlugin)
+        .add_plugin(WorldInspectorPlugin::default())
         .add_state(GameState::MainMenu)
         .add_startup_system(setup)
+        .add_startup_system(load_assets)
+        .add_system(apply_material)
         .add_system_set(SystemSet::on_enter(GameState::MainMenu))
         .add_system_set(SystemSet::on_update(GameState::MainMenu).with_system(main_menu))
         .add_system_set(SystemSet::on_exit(GameState::MainMenu))
-        .add_system_set(SystemSet::on_enter(GameState::Game))
+        .add_system_set(SystemSet::on_enter(GameState::Game).with_system(spawn_gems))
         .add_system_set(SystemSet::on_update(GameState::Game))
         .add_system_set(SystemSet::on_exit(GameState::Game))
         .run()
 }
 
 fn setup(mut commands: Commands) {
-    commands.spawn_bundle(OrthographicCameraBundle::new_3d());
+    let mut camera = OrthographicCameraBundle::new_3d();
+    camera.transform = Transform::from_xyz(0.0, 0.0, -10.0).looking_at(Vec3::ZERO, Vec3::Y);
+    commands.spawn_bundle(camera);
 }
 
 fn main_menu(
@@ -51,8 +68,51 @@ fn main_menu(
     });
 }
 
+fn spawn_gems(mut commands: Commands, assets: Res<GemAssets>, gltf_assets: Res<Assets<Gltf>>) {
+    let gltf = gltf_assets
+        .get(assets.meshes.get(&GemShape::Asscher).unwrap())
+        .unwrap();
+    commands
+        .spawn_bundle((
+            Transform::from_scale(Vec3::splat(0.125)),
+            GlobalTransform::default(),
+            GemType::Ruby,
+        ))
+        .with_children(|parent| {
+            parent.spawn_scene(gltf.scenes[0].clone());
+        });
+}
+
+fn apply_material(
+    assets: Res<GemAssets>,
+    gems: Query<(&GemType, &Children), Added<GemType>>,
+    mut children_query: Query<
+        (Option<&mut Handle<StandardMaterial>>, Option<&Children>),
+        With<Parent>,
+    >,
+    mut to_check: Local<Vec<Entity>>,
+) {
+    for (typ, children) in gems.iter() {
+        to_check.extend(children.iter().copied());
+        while let Some(child) = to_check.pop() {
+            if let Ok((material, children)) = children_query.get_mut(child) {
+                if let Some(mut mat) = material {
+                    *mat = assets.materials[*typ as usize].clone_weak();
+                }
+                to_check.extend(children.iter().flat_map(|children| children.iter()));
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 enum GameState {
     MainMenu,
     Game,
+}
+
+#[repr(u8)]
+#[derive(Component, Clone, Copy)]
+enum GemType {
+    Ruby,
 }
