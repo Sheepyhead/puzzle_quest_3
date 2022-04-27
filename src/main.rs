@@ -7,7 +7,9 @@ use bevy_egui::{
     EguiContext, EguiPlugin,
 };
 use bevy_inspector_egui::WorldInspectorPlugin;
+use bevy_match3::{prelude::*, Match3Config};
 use heron::PhysicsPlugin;
+use strum::{EnumIter, IntoEnumIterator};
 
 mod assets;
 
@@ -23,6 +25,11 @@ fn main() {
         .add_plugin(EguiPlugin)
         .add_plugin(WorldInspectorPlugin::default())
         .add_plugin(PhysicsPlugin::default())
+        .insert_resource(Match3Config {
+            gem_types: 8,
+            board_dimensions: UVec2::splat(8),
+        })
+        .add_plugin(Match3Plugin)
         .add_state(GameState::MainMenu)
         .add_startup_system(setup)
         .add_startup_system(load_assets)
@@ -30,8 +37,8 @@ fn main() {
         .add_system_set(SystemSet::on_enter(GameState::MainMenu))
         .add_system_set(SystemSet::on_update(GameState::MainMenu).with_system(main_menu))
         .add_system_set(SystemSet::on_exit(GameState::MainMenu))
-        .add_system_set(SystemSet::on_enter(GameState::Game).with_system(spawn_gems))
-        .add_system_set(SystemSet::on_update(GameState::Game))
+        .add_system_set(SystemSet::on_enter(GameState::Game).with_system(spawn_board))
+        .add_system_set(SystemSet::on_update(GameState::Game).with_system(gem_events))
         .add_system_set(SystemSet::on_exit(GameState::Game))
         .run()
 }
@@ -70,19 +77,39 @@ fn main_menu(
     });
 }
 
-fn spawn_gems(mut commands: Commands, assets: Res<GemAssets>, gltf_assets: Res<Assets<Gltf>>) {
+fn spawn_board(
+    mut commands: Commands,
+    assets: Res<GemAssets>,
+    gltf_assets: Res<Assets<Gltf>>,
+    board: Res<Board>,
+) {
     let size = 0.2;
     let left = -(size * 4.0) + (size / 2.0);
     let bottom = left;
-    for x in 0..8 {
-        for y in 0..8 {
-            spawn_gem(
-                &mut commands,
-                Vec3::new(left + x as f32 * size, bottom + y as f32 * size, 0.0),
-                GemType::Ruby,
-                &gltf_assets,
-                &assets,
-            );
+    board.iter().for_each(|(pos, typ)| {
+        spawn_gem(
+            &mut commands,
+            Vec3::new(
+                left + pos.x as f32 * size,
+                bottom + pos.y as f32 * size,
+                0.0,
+            ),
+            (*typ as u8).into(),
+            &gltf_assets,
+            &assets,
+        );
+    });
+}
+
+fn gem_events(mut events: ResMut<BoardEvents>) {
+    if let Ok(event) = events.pop() {
+        match event {
+            BoardEvent::Swapped(_, _) => todo!(),
+            BoardEvent::FailedSwap(_, _) => todo!(),
+            BoardEvent::Dropped(_) => todo!(),
+            BoardEvent::Popped(_) => todo!(),
+            BoardEvent::Spawned(_) => todo!(),
+            BoardEvent::Matched(_) => todo!(),
         }
     }
 }
@@ -140,7 +167,7 @@ enum GameState {
 }
 
 #[repr(u8)]
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, EnumIter)]
 enum GemType {
     Ruby,
     Emerald,
@@ -150,4 +177,14 @@ enum GemType {
     Amethyst,
     Skull,
     Equipment,
+}
+
+impl From<u8> for GemType {
+    fn from(val: u8) -> Self {
+        GemType::iter()
+            .enumerate()
+            .find(|(i, _)| *i == val as usize)
+            .unwrap()
+            .1
+    }
 }

@@ -12,6 +12,7 @@ bevy_hanabi = "0.2.0"
 bevy_egui = "0.13.0"
 bevy-inspector-egui = "0.10.0"
 strum = { version = "0.24.0", features = ["derive"] }
+bevy_match3 = "0.0.2"
 
 [profile.dev]
 opt-level = 1

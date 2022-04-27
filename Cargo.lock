@@ -580,6 +580,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_match3"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce4088e1f28d30c20d40b0e8fc2955dcebc9fbeb8a5ec7b3fbf40f50cdfb8b79"
+dependencies = [
+ "bevy",
+ "queues",
+ "rand",
+]
+
+[[package]]
 name = "bevy_math"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2869,9 +2880,16 @@ dependencies = [
  "bevy-inspector-egui",
  "bevy_egui",
  "bevy_hanabi",
+ "bevy_match3",
  "heron",
  "strum",
 ]
+
+[[package]]
+name = "queues"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1475abae4f8ad4998590fe3acfe20104f0a5d48fc420c817cd2c09c3f56151f0"
 
 [[package]]
 name = "quote"
