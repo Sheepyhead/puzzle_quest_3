@@ -1,9 +1,18 @@
 use bevy::{gltf::Gltf, prelude::*, utils::HashMap};
 use strum::{Display, EnumIter, IntoEnumIterator};
 
+use crate::GemType;
+
 #[derive(Display, EnumIter, Eq, Hash, PartialEq, Clone, Copy)]
 pub enum GemShape {
     Asscher,
+    Baguette,
+    Marquise,
+    Pear,
+    Round,
+    Trillion,
+    Skull,
+    Equipment,
 }
 
 impl GemShape {
@@ -13,6 +22,21 @@ impl GemShape {
 
     pub fn shattered_mesh_path(&self) -> String {
         format!("{self}_shattered.glb")
+    }
+}
+
+impl From<GemType> for GemShape {
+    fn from(typ: GemType) -> Self {
+        match typ {
+            GemType::Ruby => GemShape::Asscher,
+            GemType::Emerald => GemShape::Baguette,
+            GemType::Sapphire => GemShape::Marquise,
+            GemType::Topaz => GemShape::Pear,
+            GemType::Diamond => GemShape::Round,
+            GemType::Amethyst => GemShape::Trillion,
+            GemType::Skull => GemShape::Skull,
+            GemType::Equipment => GemShape::Equipment,
+        }
     }
 }
 
@@ -43,7 +67,8 @@ pub fn load_assets(
         Color::YELLOW,
         Color::WHITE,
         Color::PURPLE,
-        Color::AQUAMARINE,
+        Color::ANTIQUE_WHITE,
+        Color::GRAY,
     ] {
         assets.materials.push(mats.add(color.into()));
     }

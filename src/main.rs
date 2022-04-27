@@ -1,16 +1,13 @@
 #![allow(clippy::type_complexity)]
 
-use assets::{load_assets, GemAssets, GemShape};
+use assets::{load_assets, GemAssets};
 use bevy::{app::AppExit, gltf::Gltf, prelude::*};
 use bevy_egui::{
     egui::{self, FontId, RichText},
     EguiContext, EguiPlugin,
 };
 use bevy_inspector_egui::WorldInspectorPlugin;
-use heron::{
-    rapier_plugin::rapier3d::prelude::RigidBodyType, CollisionLayers, PendingConvexCollision,
-    PhysicsPlugin, RigidBody,
-};
+use heron::PhysicsPlugin;
 
 mod assets;
 
@@ -19,8 +16,8 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .insert_resource(Msaa { samples: 4 })
         .insert_resource(AmbientLight {
-            color: Color::ANTIQUE_WHITE,
-            brightness: 0.5,
+            color: Color::WHITE,
+            brightness: 3.0,
         })
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugin(EguiPlugin)
@@ -74,20 +71,85 @@ fn main_menu(
 }
 
 fn spawn_gems(mut commands: Commands, assets: Res<GemAssets>, gltf_assets: Res<Assets<Gltf>>) {
-    let gltf = gltf_assets
-        .get(assets.shatter_meshes.get(&GemShape::Asscher).unwrap())
-        .unwrap();
+    spawn_gem(
+        &mut commands,
+        Vec3::new(0.0, 0.0, 0.0),
+        GemType::Amethyst,
+        &gltf_assets,
+        &assets,
+    );
+    spawn_gem(
+        &mut commands,
+        Vec3::new(0.2, 0.2, 0.0),
+        GemType::Diamond,
+        &gltf_assets,
+        &assets,
+    );
+    spawn_gem(
+        &mut commands,
+        Vec3::new(0.4, 0.4, 0.0),
+        GemType::Emerald,
+        &gltf_assets,
+        &assets,
+    );
+    spawn_gem(
+        &mut commands,
+        Vec3::new(0.6, 0.6, 0.0),
+        GemType::Equipment,
+        &gltf_assets,
+        &assets,
+    );
+    spawn_gem(
+        &mut commands,
+        Vec3::new(0.8, 0.8, 0.0),
+        GemType::Ruby,
+        &gltf_assets,
+        &assets,
+    );
+    spawn_gem(
+        &mut commands,
+        Vec3::new(1.0, 1.0, 0.0),
+        GemType::Sapphire,
+        &gltf_assets,
+        &assets,
+    );
+    spawn_gem(
+        &mut commands,
+        Vec3::new(1.2, 1.2, 0.0),
+        GemType::Skull,
+        &gltf_assets,
+        &assets,
+    );
+    spawn_gem(
+        &mut commands,
+        Vec3::new(1.4, 1.4, 0.0),
+        GemType::Topaz,
+        &gltf_assets,
+        &assets,
+    );
+}
 
+fn spawn_gem(
+    commands: &mut Commands,
+    pos: Vec3,
+    typ: GemType,
+    gltf_assets: &Res<Assets<Gltf>>,
+    assets: &Res<GemAssets>,
+) {
     commands
         .spawn_bundle((
-            Transform::from_scale(Vec3::splat(0.125)),
+            Transform::from_translation(pos),
             GlobalTransform::default(),
-            GemType::Ruby,
-            PendingConvexCollision::default(),
-            RigidBody::Dynamic,
+            typ,
         ))
         .with_children(|parent| {
-            parent.spawn_scene(gltf.scenes[0].clone());
+            parent.spawn_scene(
+                gltf_assets
+                    .get(assets.meshes.get(&typ.into()).unwrap())
+                    .unwrap()
+                    .scenes[0]
+                    .clone(),
+            );
         });
 }
 
@@ -123,4 +185,11 @@ enum GameState {
 #[derive(Component, Clone, Copy)]
 enum GemType {
     Ruby,
+    Emerald,
+    Sapphire,
+    Topaz,
+    Diamond,
+    Amethyst,
+    Skull,
+    Equipment,
 }
