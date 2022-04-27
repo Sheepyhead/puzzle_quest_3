@@ -1,4 +1,8 @@
-use bevy::{gltf::Gltf, prelude::*, utils::HashMap};
+use bevy::{
+    gltf::Gltf,
+    prelude::{shape::Cube, *},
+    utils::HashMap,
+};
 use strum::{Display, EnumIter, IntoEnumIterator};
 
 use crate::GemType;
@@ -45,12 +49,15 @@ pub struct GemAssets {
     pub meshes: HashMap<GemShape, Handle<Gltf>>,
     pub shatter_meshes: HashMap<GemShape, Handle<Gltf>>,
     pub materials: Vec<Handle<StandardMaterial>>,
+    pub transparent: Handle<StandardMaterial>,
+    pub cube: Handle<Mesh>,
 }
 
 pub fn load_assets(
     mut commands: Commands,
     ass: Res<AssetServer>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let mut assets = GemAssets::default();
     for shape in GemShape::iter() {
@@ -72,6 +79,14 @@ pub fn load_assets(
     ] {
         assets.materials.push(mats.add(color.into()));
     }
+
+    assets.transparent = mats.add(StandardMaterial {
+        base_color: Color::rgba(0.0, 0.0, 0.0, 0.0),
+        alpha_mode: AlphaMode::Blend,
+        ..default()
+    });
+
+    assets.cube = meshes.add(Cube { size: 0.19 }.into());
 
     commands.insert_resource(assets);
 }

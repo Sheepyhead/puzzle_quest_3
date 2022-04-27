@@ -8,6 +8,9 @@ use bevy_egui::{
 };
 use bevy_inspector_egui::WorldInspectorPlugin;
 use bevy_match3::{prelude::*, Match3Config};
+use bevy_mod_raycast::{
+    DefaultPluginState, DefaultRaycastingPlugin, RayCastMesh, RayCastMethod, RayCastSource,
+};
 use heron::PhysicsPlugin;
 use strum::{EnumIter, IntoEnumIterator};
 
@@ -25,6 +28,7 @@ fn main() {
         .add_plugin(EguiPlugin)
         .add_plugin(WorldInspectorPlugin::default())
         .add_plugin(PhysicsPlugin::default())
+        .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())
         .insert_resource(Match3Config {
             gem_types: 8,
             board_dimensions: UVec2::splat(8),
@@ -38,7 +42,12 @@ fn main() {
         .add_system_set(SystemSet::on_update(GameState::MainMenu).with_system(main_menu))
         .add_system_set(SystemSet::on_exit(GameState::MainMenu))
         .add_system_set(SystemSet::on_enter(GameState::Game).with_system(spawn_board))
-        .add_system_set(SystemSet::on_update(GameState::Game).with_system(gem_events))
+        .add_system_set(
+            SystemSet::on_update(GameState::Game)
+                .with_system(gem_events)
+                .with_system(update_raycast_with_cursor)
+                .with_system(select),
+        )
         .add_system_set(SystemSet::on_exit(GameState::Game))
         .run()
 }
@@ -46,7 +55,10 @@ fn main() {
 fn setup(mut commands: Commands) {
     let mut camera = OrthographicCameraBundle::new_3d();
     camera.transform = Transform::from_xyz(0.0, 0.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y);
-    commands.spawn_bundle(camera);
+    commands
+        .spawn_bundle(camera)
+        .insert(RayCastSource::<RaycastSet>::new());
+    commands.insert_resource(DefaultPluginState::<RaycastSet>::default().with_debug_cursor())
 }
 
 fn main_menu(
@@ -84,32 +96,46 @@ fn spawn_board(
     board: Res<Board>,
 ) {
     let size = 0.2;
+    let top = (size * 4.0) - (size / 2.0);
     let left = -(size * 4.0) + (size / 2.0);
-    let bottom = left;
     board.iter().for_each(|(pos, typ)| {
-        spawn_gem(
+        let translation = Vec3::new(left + pos.x as f32 * size, top - pos.y as f32 * size, 0.0);
+
+        let gem = spawn_gem(
             &mut commands,
-            Vec3::new(
-                left + pos.x as f32 * size,
-                bottom + pos.y as f32 * size,
-                0.0,
-            ),
+            translation,
             (*typ as u8).into(),
             &gltf_assets,
             &assets,
         );
+
+        commands
+            .spawn_bundle(PbrBundle {
+                transform: Transform::from_translation(translation),
+                mesh: assets.cube.clone_weak(),
+                material: assets.transparent.clone_weak(),
+                ..default()
+            })
+            .insert_bundle((
+                GemSlot {
+                    pos: *pos,
+                    gem: Some(gem),
+                },
+                RayCastMesh::<RaycastSet>::default(),
+            ));
     });
+    commands.insert_resource(SelectedSlot(None));
 }
 
 fn gem_events(mut events: ResMut<BoardEvents>) {
     if let Ok(event) = events.pop() {
         match event {
-            BoardEvent::Swapped(_, _) => todo!(),
-            BoardEvent::FailedSwap(_, _) => todo!(),
-            BoardEvent::Dropped(_) => todo!(),
-            BoardEvent::Popped(_) => todo!(),
-            BoardEvent::Spawned(_) => todo!(),
-            BoardEvent::Matched(_) => todo!(),
+            BoardEvent::Swapped(from, to) => info!("Swapped from {from} to {to}"),
+            BoardEvent::FailedSwap(from, to) => info!("Failed to swap from {from} to {to}"),
+            BoardEvent::Dropped(drops) => info!("Dropped {drops:?}"),
+            BoardEvent::Popped(pop) => info!("Popped {pop}"),
+            BoardEvent::Spawned(spawns) => info!("Spawned {spawns:?}"),
+            BoardEvent::Matched(matches) => info!("Matched {:?}", matches.without_duplicates()),
         }
     }
 }
@@ -120,7 +146,7 @@ fn spawn_gem(
     typ: GemType,
     gltf_assets: &Res<Assets<Gltf>>,
     assets: &Res<GemAssets>,
-) {
+) -> Entity {
     commands
         .spawn_bundle((
             Transform::from_translation(pos),
@@ -135,7 +161,8 @@ fn spawn_gem(
                     .scenes[0]
                     .clone(),
             );
-        });
+        })
+        .id()
 }
 
 fn apply_material(
@@ -188,3 +215,58 @@ impl From<u8> for GemType {
             .1
     }
 }
+
+struct RaycastSet;
+
+#[derive(Component)]
+struct GemSlot {
+    pos: UVec2,
+    gem: Option<Entity>,
+}
+
+fn update_raycast_with_cursor(
+    mut cursor: EventReader<CursorMoved>,
+    mut query: Query<&mut RayCastSource<RaycastSet>>,
+) {
+    for mut pick_source in &mut query.iter_mut() {
+        if let Some(cursor_latest) = cursor.iter().last() {
+            pick_source.cast_method = RayCastMethod::Screenspace(cursor_latest.position);
+        }
+    }
+}
+
+fn select(
+    mouse_event: Res<Input<MouseButton>>,
+    mut selected: ResMut<SelectedSlot>,
+    mut board_commands: ResMut<BoardCommands>,
+    from: Query<&RayCastSource<RaycastSet>>,
+    to: Query<&GemSlot>,
+) {
+    for raycast_source in from.iter() {
+        if let Some((hit, _)) = raycast_source.intersect_top() {
+            if mouse_event.just_pressed(MouseButton::Left) {
+                if let Ok(hit_slot) = to.get(hit) {
+                    if hit_slot.gem.is_some() {
+                        if let Some(selected_entity) = **selected {
+                            if let Ok(selected_slot) = to.get(selected_entity) {
+                                if selected_entity != hit {
+                                    board_commands
+                                        .push(BoardCommand::Swap(selected_slot.pos, hit_slot.pos))
+                                        .unwrap();
+                                    **selected = None;
+                                }
+                            }
+                        } else {
+                            **selected = Some(hit);
+                        }
+                    }
+                } else {
+                    **selected = None;
+                }
+            }
+        }
+    }
+}
+
+#[derive(Deref, DerefMut)]
+struct SelectedSlot(Option<Entity>);
