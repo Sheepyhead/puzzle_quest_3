@@ -38,7 +38,7 @@ fn main() {
 
 fn setup(mut commands: Commands) {
     let mut camera = OrthographicCameraBundle::new_3d();
-    camera.transform = Transform::from_xyz(0.0, 0.0, -10.0).looking_at(Vec3::ZERO, Vec3::Y);
+    camera.transform = Transform::from_xyz(0.0, 0.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y);
     commands.spawn_bundle(camera);
 }
 
@@ -71,62 +71,20 @@ fn main_menu(
 }
 
 fn spawn_gems(mut commands: Commands, assets: Res<GemAssets>, gltf_assets: Res<Assets<Gltf>>) {
-    spawn_gem(
-        &mut commands,
-        Vec3::new(0.0, 0.0, 0.0),
-        GemType::Amethyst,
-        &gltf_assets,
-        &assets,
-    );
-    spawn_gem(
-        &mut commands,
-        Vec3::new(0.2, 0.2, 0.0),
-        GemType::Diamond,
-        &gltf_assets,
-        &assets,
-    );
-    spawn_gem(
-        &mut commands,
-        Vec3::new(0.4, 0.4, 0.0),
-        GemType::Emerald,
-        &gltf_assets,
-        &assets,
-    );
-    spawn_gem(
-        &mut commands,
-        Vec3::new(0.6, 0.6, 0.0),
-        GemType::Equipment,
-        &gltf_assets,
-        &assets,
-    );
-    spawn_gem(
-        &mut commands,
-        Vec3::new(0.8, 0.8, 0.0),
-        GemType::Ruby,
-        &gltf_assets,
-        &assets,
-    );
-    spawn_gem(
-        &mut commands,
-        Vec3::new(1.0, 1.0, 0.0),
-        GemType::Sapphire,
-        &gltf_assets,
-        &assets,
-    );
-    spawn_gem(
-        &mut commands,
-        Vec3::new(1.2, 1.2, 0.0),
-        GemType::Skull,
-        &gltf_assets,
-        &assets,
-    );
-    spawn_gem(
-        &mut commands,
-        Vec3::new(1.4, 1.4, 0.0),
-        GemType::Topaz,
-        &gltf_assets,
-        &assets,
-    );
+    let size = 0.2;
+    let left = -(size * 4.0) + (size / 2.0);
+    let bottom = left;
+    for x in 0..8 {
+        for y in 0..8 {
+            spawn_gem(
+                &mut commands,
+                Vec3::new(left + x as f32 * size, bottom + y as f32 * size, 0.0),
+                GemType::Ruby,
+                &gltf_assets,
+                &assets,
+            );
+        }
+    }
 }
 
 fn spawn_gem(
