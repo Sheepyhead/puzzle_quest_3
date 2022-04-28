@@ -1,4 +1,7 @@
 #![allow(clippy::type_complexity)]
+#![feature(is_some_with)]
+
+use std::time::Duration;
 
 use assets::{load_assets, GemAssets};
 use bevy::{app::AppExit, gltf::Gltf, prelude::*};
@@ -8,9 +11,8 @@ use bevy_egui::{
 };
 use bevy_inspector_egui::WorldInspectorPlugin;
 use bevy_match3::{prelude::*, Match3Config};
-use bevy_mod_raycast::{
-    DefaultPluginState, DefaultRaycastingPlugin, RayCastMesh, RayCastMethod, RayCastSource,
-};
+use bevy_mod_raycast::{DefaultRaycastingPlugin, RayCastMesh, RayCastMethod, RayCastSource};
+use bevy_tweening::{lens::*, Animator, EaseFunction, Tween, TweeningPlugin, TweeningType};
 use heron::PhysicsPlugin;
 use strum::{EnumIter, IntoEnumIterator};
 
@@ -29,6 +31,7 @@ fn main() {
         .add_plugin(WorldInspectorPlugin::default())
         .add_plugin(PhysicsPlugin::default())
         .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())
+        .add_plugin(TweeningPlugin)
         .insert_resource(Match3Config {
             gem_types: 8,
             board_dimensions: UVec2::splat(8),
@@ -46,7 +49,8 @@ fn main() {
             SystemSet::on_update(GameState::Game)
                 .with_system(gem_events)
                 .with_system(update_raycast_with_cursor)
-                .with_system(select),
+                .with_system(select)
+                .with_system(animate_selected),
         )
         .add_system_set(SystemSet::on_exit(GameState::Game))
         .run()
@@ -58,7 +62,6 @@ fn setup(mut commands: Commands) {
     commands
         .spawn_bundle(camera)
         .insert(RayCastSource::<RaycastSet>::new());
-    commands.insert_resource(DefaultPluginState::<RaycastSet>::default().with_debug_cursor())
 }
 
 fn main_menu(
@@ -236,37 +239,91 @@ fn update_raycast_with_cursor(
 }
 
 fn select(
-    mouse_event: Res<Input<MouseButton>>,
+    mouse_buttons: Res<Input<MouseButton>>,
     mut selected: ResMut<SelectedSlot>,
     mut board_commands: ResMut<BoardCommands>,
     from: Query<&RayCastSource<RaycastSet>>,
     to: Query<&GemSlot>,
 ) {
+    if !mouse_buttons.just_pressed(MouseButton::Left) {
+        return;
+    }
     for raycast_source in from.iter() {
-        if let Some((hit, _)) = raycast_source.intersect_top() {
-            if mouse_event.just_pressed(MouseButton::Left) {
-                if let Ok(hit_slot) = to.get(hit) {
-                    if hit_slot.gem.is_some() {
-                        if let Some(selected_entity) = **selected {
-                            if let Ok(selected_slot) = to.get(selected_entity) {
-                                if selected_entity != hit {
-                                    board_commands
-                                        .push(BoardCommand::Swap(selected_slot.pos, hit_slot.pos))
-                                        .unwrap();
-                                    **selected = None;
-                                }
-                            }
-                        } else {
-                            **selected = Some(hit);
-                        }
-                    }
-                } else {
-                    **selected = None;
-                }
+        let (hit_entity, hit_slot) = match raycast_source
+            .intersect_top()
+            .and_then(|(hit, _)| to.get(hit).map(|hit_slot| (hit, hit_slot)).ok())
+        {
+            Some(val) => val,
+            None => {
+                **selected = None;
+                continue;
             }
+        };
+
+        let previously_selected_slot =
+            selected.and_then(|selected_slot| to.get(selected_slot).ok());
+
+        if previously_selected_slot
+            .and_then(|slot| slot.gem)
+            .is_some_and(|previous_gem| hit_slot.gem.is_some_and(|hit_gem| hit_gem == previous_gem))
+        {
+            **selected = None;
+            continue;
+        }
+
+        if let Some(previously_selected_slot) = previously_selected_slot {
+            board_commands
+                .push(BoardCommand::Swap(previously_selected_slot.pos, hit_slot.pos))
+                .unwrap();
+            **selected = None;
+        } else {
+            **selected = Some(hit_entity);
         }
     }
 }
 
-#[derive(Deref, DerefMut)]
+fn animate_selected(
+    mut commands: Commands,
+    selected: Res<SelectedSlot>,
+    mut prev_selected: Local<Option<SelectedSlot>>,
+    slots: Query<&GemSlot>,
+    mut animators: Query<(&mut Transform, &mut Animator<Transform>)>,
+) {
+    if !selected.is_changed() {
+        return;
+    }
+
+    // stop old animation, if any
+    if let Some((mut transform, mut animator)) = (*prev_selected)
+        .and_then(|prev_selected| *prev_selected)
+        .and_then(|prev_selected| slots.get(prev_selected).ok())
+        .and_then(|selected_gem| selected_gem.gem)
+        .and_then(|selected_gem| animators.get_mut(selected_gem).ok())
+    {
+        animator.stop();
+        transform.rotation = Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, 0.0);
+    }
+
+    // animate new selection
+    if let Some(selected_gem) = (**selected).and_then(|selected_slot| {
+        slots
+            .get(selected_slot)
+            .expect("Selected slot entity is not a gem??")
+            .gem
+    }) {
+        let seq = Tween::new(
+            EaseFunction::SineInOut,
+            TweeningType::PingPong,
+            Duration::from_secs_f32(0.3),
+            TransformRotateZLens {
+                start: -0.5,
+                end: 0.5,
+            },
+        );
+        commands.entity(selected_gem).insert(Animator::new(seq));
+        *prev_selected = Some(*selected);
+    }
+}
+
+#[derive(Deref, DerefMut, Clone, Copy)]
 struct SelectedSlot(Option<Entity>);
