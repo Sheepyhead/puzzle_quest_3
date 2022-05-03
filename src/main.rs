@@ -273,7 +273,10 @@ fn select(
 
         if let Some(previously_selected_slot) = previously_selected_slot {
             board_commands
-                .push(BoardCommand::Swap(previously_selected_slot.pos, hit_slot.pos))
+                .push(BoardCommand::Swap(
+                    previously_selected_slot.pos,
+                    hit_slot.pos,
+                ))
                 .unwrap();
             **selected = None;
         } else {
@@ -295,7 +298,9 @@ fn animate_selected(
 
     // stop old animation, if any
     if let Some((mut transform, mut animator)) = (*prev_selected)
-        .and_then(|prev_selected| *prev_selected)
+        .as_deref()
+        .copied()
+        .flatten()
         .and_then(|prev_selected| slots.get(prev_selected).ok())
         .and_then(|selected_gem| selected_gem.gem)
         .and_then(|selected_gem| animators.get_mut(selected_gem).ok())
