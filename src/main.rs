@@ -12,9 +12,7 @@ use bevy_egui::{
 use bevy_inspector_egui::WorldInspectorPlugin;
 use bevy_match3::{prelude::*, Match3Config};
 use bevy_mod_raycast::{DefaultRaycastingPlugin, RayCastMesh, RayCastMethod, RayCastSource};
-use bevy_tweening::{
-    lens::*, Animator, AnimatorState, EaseFunction, Tween, TweeningPlugin, TweeningType,
-};
+use bevy_tweening::{lens::*, Animator, EaseFunction, Tween, TweeningPlugin, TweeningType};
 use heron::PhysicsPlugin;
 use strum::{EnumIter, IntoEnumIterator};
 
@@ -137,7 +135,7 @@ fn gem_events(
     mut events: ResMut<BoardEvents>,
     mut board_commands: ResMut<BoardCommands>,
     gems: Query<(&Transform, Option<&Animator<Transform>>, Entity), With<GemType>>,
-    mut slots: Query<&mut GemSlot>,
+    mut slots: Query<(&Transform, &mut GemSlot)>,
 ) {
     // Only read new events if we're done moving gems around
     for (animator, entity) in gems
@@ -241,10 +239,36 @@ fn gem_events(
                     )),
                 ));
             }
-            BoardEvent::Dropped(drops) => info!("Dropped {drops:?}"),
+            BoardEvent::Dropped(drops) => {
+                info!("Dropped {drops:?}");
+                for Drop { from, to } in drops.iter().copied() {
+                    let from_gem = get_gem_from_pos(from, &slots);
+                    let (to_transform, to_slot) = get_slot_from_pos(to, &slots);
+
+                    swap_gems_in_slots(
+                        &GemSlot {
+                            pos: from,
+                            gem: Some(from_gem),
+                        },
+                        &to_slot,
+                        &mut slots,
+                    );
+
+                    let from_transform = gems.get_component::<Transform>(from_gem).unwrap();
+                    commands.entity(from_gem).insert(Animator::new(Tween::new(
+                        EaseFunction::CubicIn,
+                        TweeningType::Once,
+                        Duration::from_secs_f32(0.25),
+                        TransformPositionLens {
+                            start: from_transform.translation,
+                            end: to_transform.translation,
+                        },
+                    )));
+                }
+            }
             BoardEvent::Popped(pop) => {
                 info!("Popped {pop}");
-                let mut slot = slots.iter_mut().find(|slot| slot.pos == pop).unwrap();
+                let mut slot = slots.iter_mut().find(|slot| slot.1.pos == pop).unwrap().1;
                 commands.entity(slot.gem.unwrap()).despawn_recursive();
                 slot.gem = None;
             }
@@ -261,8 +285,12 @@ fn gem_events(
     }
 }
 
-fn swap_gems_in_slots(slot1: &GemSlot, slot2: &GemSlot, slots: &mut Query<&mut GemSlot>) {
-    slots.for_each_mut(|mut slot| {
+fn swap_gems_in_slots(
+    slot1: &GemSlot,
+    slot2: &GemSlot,
+    slots: &mut Query<(&Transform, &mut GemSlot)>,
+) {
+    slots.for_each_mut(|(_, mut slot)| {
         if slot.pos == slot1.pos {
             slot.gem = slot2.gem;
         } else if slot.pos == slot2.pos {
@@ -271,14 +299,19 @@ fn swap_gems_in_slots(slot1: &GemSlot, slot2: &GemSlot, slots: &mut Query<&mut G
     });
 }
 
-fn get_gem_from_pos(pos: UVec2, slots: &Query<&mut GemSlot>) -> Entity {
-    let from_gem = slots
+fn get_gem_from_pos(pos: UVec2, slots: &Query<(&Transform, &mut GemSlot)>) -> Entity {
+    get_slot_from_pos(pos, slots).1.gem.unwrap()
+}
+
+fn get_slot_from_pos(
+    pos: UVec2,
+    slots: &Query<(&Transform, &mut GemSlot)>,
+) -> (Transform, GemSlot) {
+    slots
         .iter()
-        .find(|slot| slot.pos == pos)
+        .find(|(_, slot)| slot.pos == pos)
+        .map(|(t, s)| (*t, *s))
         .unwrap()
-        .gem
-        .unwrap();
-    from_gem
 }
 
 fn spawn_gem(
@@ -359,7 +392,7 @@ impl From<u8> for GemType {
 
 struct RaycastSet;
 
-#[derive(Component)]
+#[derive(Component, Copy, Clone)]
 struct GemSlot {
     pos: UVec2,
     gem: Option<Entity>,
@@ -400,10 +433,10 @@ fn select(
         }) {
             continue;
         }
-        // if gem is moving, return 
+        // if gem is moving, return
         else if animator.progress() != 1.0 {
             return;
-        } 
+        }
         // gem has finished moving, remove animator
         else {
             commands.entity(entity).remove::<Animator<Transform>>();
