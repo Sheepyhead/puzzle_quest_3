@@ -12,7 +12,9 @@ use bevy_egui::{
 use bevy_inspector_egui::WorldInspectorPlugin;
 use bevy_match3::{prelude::*, Match3Config};
 use bevy_mod_raycast::{DefaultRaycastingPlugin, RayCastMesh, RayCastMethod, RayCastSource};
-use bevy_tweening::{lens::*, Animator, EaseFunction, Tween, TweeningPlugin, TweeningType};
+use bevy_tweening::{
+    lens::*, Animator, EaseFunction, EaseMethod, Tween, TweeningPlugin, TweeningType,
+};
 use heron::PhysicsPlugin;
 use strum::{EnumIter, IntoEnumIterator};
 
@@ -74,7 +76,7 @@ fn main_menu(
         ui.with_layout(
             egui::Layout::default().with_cross_align(egui::Align::Center),
             |ui| {
-                ui.heading(RichText::new("PUZZLE QUEST 2").font(FontId::monospace(100.0)));
+                ui.heading(RichText::new("UNNAMED MATCH 3 RPG").font(FontId::monospace(100.0)));
                 if ui
                     .button(RichText::new("Start").font(FontId::monospace(50.0)))
                     .clicked()
@@ -284,13 +286,19 @@ fn gem_events(
                     let typ = GemType::from(typ as u8);
                     let (transform, mut slot) =
                         slots.iter_mut().find(|(_, slot)| slot.pos == pos).unwrap();
-                    let gem = spawn_gem(
-                        &mut commands,
-                        transform.translation,
-                        typ,
-                        &gltf_assets,
-                        &assets,
-                    );
+                    let mut start_pos = transform.translation;
+                    // offset starting position by about a board length so they drop in from off screen
+                    start_pos.y += 0.2 * 8.0;
+                    let gem = spawn_gem(&mut commands, start_pos, typ, &gltf_assets, &assets);
+                    commands.entity(gem).insert(Animator::new(Tween::new(
+                        EaseMethod::Linear,
+                        TweeningType::Once,
+                        Duration::from_secs_f32(0.25),
+                        TransformPositionLens {
+                            start: start_pos,
+                            end: transform.translation,
+                        },
+                    )));
 
                     slot.gem = Some(gem);
                 }
