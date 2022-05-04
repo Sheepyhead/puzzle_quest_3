@@ -130,10 +130,58 @@ fn spawn_board(
     commands.insert_resource(SelectedSlot(None));
 }
 
-fn gem_events(mut events: ResMut<BoardEvents>) {
+fn gem_events(
+    mut commands: Commands,
+    mut events: ResMut<BoardEvents>,
+    gems: Query<&Transform, With<GemType>>,
+    mut slots: Query<&mut GemSlot>,
+) {
     if let Ok(event) = events.pop() {
         match event {
-            BoardEvent::Swapped(from, to) => info!("Swapped from {from} to {to}"),
+            BoardEvent::Swapped(from, to) => {
+                info!("Swapped from {from} to {to}");
+                let from_gem = slots
+                    .iter()
+                    .find(|slot| slot.pos == from)
+                    .unwrap()
+                    .gem
+                    .unwrap();
+                let to_gem = slots
+                    .iter()
+                    .find(|slot| slot.pos == to)
+                    .unwrap()
+                    .gem
+                    .unwrap();
+
+                slots.for_each_mut(|mut slot| {
+                    if slot.pos == from {
+                        slot.gem = Some(to_gem);
+                    } else if slot.pos == to {
+                        slot.gem = Some(from_gem);
+                    }
+                });
+
+                let from_transform = gems.get(from_gem).unwrap();
+                let to_transform = gems.get(to_gem).unwrap();
+                commands.entity(from_gem).insert(Animator::new(Tween::new(
+                    EaseFunction::QuadraticInOut,
+                    TweeningType::Once,
+                    Duration::from_secs(1),
+                    TransformPositionLens {
+                        start: from_transform.translation,
+                        end: to_transform.translation,
+                    },
+                )));
+                commands.entity(to_gem).insert(Animator::new(Tween::new(
+                    EaseFunction::QuadraticInOut,
+                    TweeningType::Once,
+                    Duration::from_secs(1),
+                    TransformPositionLens {
+                        start: to_transform.translation,
+                        end: from_transform.translation,
+                    },
+                )));
+            }
             BoardEvent::FailedSwap(from, to) => info!("Failed to swap from {from} to {to}"),
             BoardEvent::Dropped(drops) => info!("Dropped {drops:?}"),
             BoardEvent::Popped(pop) => info!("Popped {pop}"),
