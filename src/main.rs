@@ -12,7 +12,9 @@ use bevy_egui::{
 use bevy_inspector_egui::WorldInspectorPlugin;
 use bevy_match3::{prelude::*, Match3Config};
 use bevy_mod_raycast::{DefaultRaycastingPlugin, RayCastMesh, RayCastMethod, RayCastSource};
-use bevy_tweening::{lens::*, Animator, EaseFunction, Tween, TweeningPlugin, TweeningType};
+use bevy_tweening::{
+    lens::*, Animator, AnimatorState, EaseFunction, Tween, TweeningPlugin, TweeningType,
+};
 use heron::PhysicsPlugin;
 use strum::{EnumIter, IntoEnumIterator};
 
@@ -133,9 +135,22 @@ fn spawn_board(
 fn gem_events(
     mut commands: Commands,
     mut events: ResMut<BoardEvents>,
-    gems: Query<&Transform, With<GemType>>,
+    mut board_commands: ResMut<BoardCommands>,
+    gems: Query<(&Transform, Option<&Animator<Transform>>, Entity), With<GemType>>,
     mut slots: Query<&mut GemSlot>,
 ) {
+    // Only read new events if we're done moving gems around
+    for (animator, entity) in gems
+        .iter()
+        .filter_map(|(_, animator, entity)| animator.map(|animator| (animator, entity)))
+    {
+        if animator.progress() != 1.0 {
+            return;
+        } else {
+            commands.entity(entity).remove::<Animator<Transform>>();
+        }
+    }
+
     if let Ok(event) = events.pop() {
         match event {
             BoardEvent::Swapped(from, to) => {
@@ -155,8 +170,8 @@ fn gem_events(
                     &mut slots,
                 );
 
-                let from_transform = gems.get(from_gem).unwrap();
-                let to_transform = gems.get(to_gem).unwrap();
+                let from_transform = gems.get_component::<Transform>(from_gem).unwrap();
+                let to_transform = gems.get_component::<Transform>(to_gem).unwrap();
                 commands.entity(from_gem).insert(Animator::new(Tween::new(
                     EaseFunction::QuadraticInOut,
                     TweeningType::Once,
@@ -182,8 +197,8 @@ fn gem_events(
                 let from_gem = get_gem_from_pos(from, &slots);
                 let to_gem = get_gem_from_pos(to, &slots);
 
-                let from_transform = gems.get(from_gem).unwrap();
-                let to_transform = gems.get(to_gem).unwrap();
+                let from_transform = gems.get_component::<Transform>(from_gem).unwrap();
+                let to_transform = gems.get_component::<Transform>(to_gem).unwrap();
 
                 commands.entity(from_gem).insert(Animator::new(
                     Tween::new(
@@ -227,9 +242,21 @@ fn gem_events(
                 ));
             }
             BoardEvent::Dropped(drops) => info!("Dropped {drops:?}"),
-            BoardEvent::Popped(pop) => info!("Popped {pop}"),
+            BoardEvent::Popped(pop) => {
+                info!("Popped {pop}");
+                let mut slot = slots.iter_mut().find(|slot| slot.pos == pop).unwrap();
+                commands.entity(slot.gem.unwrap()).despawn_recursive();
+                slot.gem = None;
+            }
             BoardEvent::Spawned(spawns) => info!("Spawned {spawns:?}"),
-            BoardEvent::Matched(matches) => info!("Matched {:?}", matches.without_duplicates()),
+            BoardEvent::Matched(matches) => {
+                info!("Matched {:?}", matches.without_duplicates());
+                board_commands
+                    .push(BoardCommand::Pop(
+                        matches.without_duplicates().iter().copied().collect(),
+                    ))
+                    .unwrap();
+            }
         }
     }
 }
@@ -350,14 +377,37 @@ fn update_raycast_with_cursor(
 }
 
 fn select(
+    mut commands: Commands,
     mouse_buttons: Res<Input<MouseButton>>,
     mut selected: ResMut<SelectedSlot>,
     mut board_commands: ResMut<BoardCommands>,
     from: Query<&RayCastSource<RaycastSet>>,
     to: Query<&GemSlot>,
+    gems: Query<(&Animator<Transform>, Entity), With<GemType>>,
 ) {
     if !mouse_buttons.just_pressed(MouseButton::Left) {
         return;
+    }
+    // Only allow selection if no gems (other than currently selected gem) are moving
+    for (animator, entity) in gems.iter() {
+        // if a gem is selected and is moving, check next gem
+        if selected.is_some_and(|selected| {
+            to.get(*selected).is_ok_and(|selected_slot| {
+                selected_slot
+                    .gem
+                    .is_some_and(|selected_gem| *selected_gem == entity)
+            })
+        }) {
+            continue;
+        }
+        // if gem is moving, return 
+        else if animator.progress() != 1.0 {
+            return;
+        } 
+        // gem has finished moving, remove animator
+        else {
+            commands.entity(entity).remove::<Animator<Transform>>();
+        }
     }
     for raycast_source in from.iter() {
         let (hit_entity, hit_slot) = match raycast_source
@@ -446,16 +496,22 @@ fn animate_selected(
     }
 
     // stop old animation, if any
-    if let Some((mut transform, mut animator)) = (*prev_selected)
+    if let Some((mut transform, mut animator, entity)) = (*prev_selected)
         .as_deref()
         .copied()
         .flatten()
         .and_then(|prev_selected| slots.get(prev_selected).ok())
         .and_then(|selected_gem| selected_gem.gem)
-        .and_then(|selected_gem| animators.get_mut(selected_gem).ok())
+        .and_then(|selected_gem| {
+            animators
+                .get_mut(selected_gem)
+                .ok()
+                .map(|gem| (gem.0, gem.1, selected_gem))
+        })
     {
         animator.stop();
         transform.rotation = Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, 0.0);
+        commands.entity(entity).remove::<Animator<Transform>>();
     }
 
     // animate new selection
