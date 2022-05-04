@@ -98,11 +98,8 @@ fn spawn_board(
     gltf_assets: Res<Assets<Gltf>>,
     board: Res<Board>,
 ) {
-    let size = 0.2;
-    let top = (size * 4.0) - (size / 2.0);
-    let left = -(size * 4.0) + (size / 2.0);
     board.iter().for_each(|(pos, typ)| {
-        let translation = Vec3::new(left + pos.x as f32 * size, top - pos.y as f32 * size, 0.0);
+        let translation = gem_pos_from(pos);
 
         let gem = spawn_gem(
             &mut commands,
@@ -130,10 +127,19 @@ fn spawn_board(
     commands.insert_resource(SelectedSlot(None));
 }
 
+fn gem_pos_from(pos: &UVec2) -> Vec3 {
+    let size = 0.2;
+    let top = (size * 4.0) - (size / 2.0);
+    let left = -(size * 4.0) + (size / 2.0);
+    Vec3::new(left + pos.x as f32 * size, top - pos.y as f32 * size, 0.0)
+}
+
 fn gem_events(
     mut commands: Commands,
     mut events: ResMut<BoardEvents>,
     mut board_commands: ResMut<BoardCommands>,
+    gltf_assets: Res<Assets<Gltf>>,
+    assets: Res<GemAssets>,
     gems: Query<(&Transform, Option<&Animator<Transform>>, Entity), With<GemType>>,
     mut slots: Query<(&Transform, &mut GemSlot)>,
 ) {
@@ -272,7 +278,23 @@ fn gem_events(
                 commands.entity(slot.gem.unwrap()).despawn_recursive();
                 slot.gem = None;
             }
-            BoardEvent::Spawned(spawns) => info!("Spawned {spawns:?}"),
+            BoardEvent::Spawned(spawns) => {
+                info!("Spawned {spawns:?}");
+                for (pos, typ) in spawns.iter().copied() {
+                    let typ = GemType::from(typ as u8);
+                    let (transform, mut slot) =
+                        slots.iter_mut().find(|(_, slot)| slot.pos == pos).unwrap();
+                    let gem = spawn_gem(
+                        &mut commands,
+                        transform.translation,
+                        typ,
+                        &gltf_assets,
+                        &assets,
+                    );
+
+                    slot.gem = Some(gem);
+                }
+            }
             BoardEvent::Matched(matches) => {
                 info!("Matched {:?}", matches.without_duplicates());
                 board_commands
