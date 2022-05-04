@@ -140,33 +140,27 @@ fn gem_events(
         match event {
             BoardEvent::Swapped(from, to) => {
                 info!("Swapped from {from} to {to}");
-                let from_gem = slots
-                    .iter()
-                    .find(|slot| slot.pos == from)
-                    .unwrap()
-                    .gem
-                    .unwrap();
-                let to_gem = slots
-                    .iter()
-                    .find(|slot| slot.pos == to)
-                    .unwrap()
-                    .gem
-                    .unwrap();
+                let from_gem = get_gem_from_pos(from, &slots);
+                let to_gem = get_gem_from_pos(to, &slots);
 
-                slots.for_each_mut(|mut slot| {
-                    if slot.pos == from {
-                        slot.gem = Some(to_gem);
-                    } else if slot.pos == to {
-                        slot.gem = Some(from_gem);
-                    }
-                });
+                swap_gems_in_slots(
+                    &GemSlot {
+                        pos: from,
+                        gem: Some(from_gem),
+                    },
+                    &GemSlot {
+                        pos: to,
+                        gem: Some(to_gem),
+                    },
+                    &mut slots,
+                );
 
                 let from_transform = gems.get(from_gem).unwrap();
                 let to_transform = gems.get(to_gem).unwrap();
                 commands.entity(from_gem).insert(Animator::new(Tween::new(
                     EaseFunction::QuadraticInOut,
                     TweeningType::Once,
-                    Duration::from_secs(1),
+                    Duration::from_secs_f32(0.5),
                     TransformPositionLens {
                         start: from_transform.translation,
                         end: to_transform.translation,
@@ -175,20 +169,89 @@ fn gem_events(
                 commands.entity(to_gem).insert(Animator::new(Tween::new(
                     EaseFunction::QuadraticInOut,
                     TweeningType::Once,
-                    Duration::from_secs(1),
+                    Duration::from_secs_f32(0.5),
                     TransformPositionLens {
                         start: to_transform.translation,
                         end: from_transform.translation,
                     },
                 )));
             }
-            BoardEvent::FailedSwap(from, to) => info!("Failed to swap from {from} to {to}"),
+            BoardEvent::FailedSwap(from, to) => {
+                info!("Failed to swap from {from} to {to}");
+
+                let from_gem = get_gem_from_pos(from, &slots);
+                let to_gem = get_gem_from_pos(to, &slots);
+
+                let from_transform = gems.get(from_gem).unwrap();
+                let to_transform = gems.get(to_gem).unwrap();
+
+                commands.entity(from_gem).insert(Animator::new(
+                    Tween::new(
+                        EaseFunction::QuadraticInOut,
+                        TweeningType::Once,
+                        Duration::from_secs_f32(0.25),
+                        TransformPositionLens {
+                            start: from_transform.translation,
+                            end: to_transform.translation,
+                        },
+                    )
+                    .then(Tween::new(
+                        EaseFunction::QuadraticInOut,
+                        TweeningType::Once,
+                        Duration::from_secs_f32(0.25),
+                        TransformPositionLens {
+                            start: to_transform.translation,
+                            end: from_transform.translation,
+                        },
+                    )),
+                ));
+                commands.entity(to_gem).insert(Animator::new(
+                    Tween::new(
+                        EaseFunction::QuadraticInOut,
+                        TweeningType::Once,
+                        Duration::from_secs_f32(0.25),
+                        TransformPositionLens {
+                            start: to_transform.translation,
+                            end: from_transform.translation,
+                        },
+                    )
+                    .then(Tween::new(
+                        EaseFunction::QuadraticInOut,
+                        TweeningType::Once,
+                        Duration::from_secs_f32(0.25),
+                        TransformPositionLens {
+                            start: from_transform.translation,
+                            end: to_transform.translation,
+                        },
+                    )),
+                ));
+            }
             BoardEvent::Dropped(drops) => info!("Dropped {drops:?}"),
             BoardEvent::Popped(pop) => info!("Popped {pop}"),
             BoardEvent::Spawned(spawns) => info!("Spawned {spawns:?}"),
             BoardEvent::Matched(matches) => info!("Matched {:?}", matches.without_duplicates()),
         }
     }
+}
+
+fn swap_gems_in_slots(slot1: &GemSlot, slot2: &GemSlot, slots: &mut Query<&mut GemSlot>) {
+    slots.for_each_mut(|mut slot| {
+        if slot.pos == slot1.pos {
+            slot.gem = slot2.gem;
+        } else if slot.pos == slot2.pos {
+            slot.gem = slot1.gem;
+        }
+    });
+}
+
+fn get_gem_from_pos(pos: UVec2, slots: &Query<&mut GemSlot>) -> Entity {
+    let from_gem = slots
+        .iter()
+        .find(|slot| slot.pos == pos)
+        .unwrap()
+        .gem
+        .unwrap();
+    from_gem
 }
 
 fn spawn_gem(
