@@ -383,16 +383,54 @@ fn select(
         }
 
         if let Some(previously_selected_slot) = previously_selected_slot {
-            board_commands
-                .push(BoardCommand::Swap(
-                    previously_selected_slot.pos,
-                    hit_slot.pos,
-                ))
-                .unwrap();
+            if previously_selected_slot
+                .pos
+                .cardinally_adjacent(&hit_slot.pos)
+            {
+                board_commands
+                    .push(BoardCommand::Swap(
+                        previously_selected_slot.pos,
+                        hit_slot.pos,
+                    ))
+                    .unwrap();
+            }
             **selected = None;
         } else {
             **selected = Some(hit_entity);
         }
+    }
+}
+
+trait BoardPosition {
+    fn left(&self) -> Self;
+    fn right(&self) -> Self;
+    fn up(&self) -> Self;
+    fn down(&self) -> Self;
+    fn cardinally_adjacent(&self, other: &Self) -> bool;
+}
+
+impl BoardPosition for UVec2 {
+    fn left(&self) -> Self {
+        Self::new(self.x.saturating_sub(1), self.y)
+    }
+
+    fn right(&self) -> Self {
+        Self::new(self.x.saturating_add(1), self.y)
+    }
+
+    fn up(&self) -> Self {
+        Self::new(self.x, self.y.saturating_sub(1))
+    }
+
+    fn down(&self) -> Self {
+        Self::new(self.x, self.y.saturating_add(1))
+    }
+
+    fn cardinally_adjacent(&self, other: &Self) -> bool {
+        self == &other.left()
+            || self == &other.right()
+            || self == &other.up()
+            || self == &other.down()
     }
 }
 
