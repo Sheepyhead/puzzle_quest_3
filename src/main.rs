@@ -1,10 +1,11 @@
 #![allow(clippy::type_complexity)]
+#![allow(clippy::too_many_arguments)]
 #![feature(is_some_with)]
 
 use std::time::Duration;
 
 use assets::{load_assets, GemAssets};
-use bevy::{app::AppExit, gltf::Gltf, prelude::*};
+use bevy::{app::AppExit, gltf::Gltf, prelude::*, utils::HashMap};
 use bevy_egui::{
     egui::{self, FontId, RichText},
     EguiContext, EguiPlugin,
@@ -16,7 +17,7 @@ use bevy_tweening::{
     lens::*, Animator, EaseFunction, EaseMethod, Tween, TweeningPlugin, TweeningType,
 };
 use heron::PhysicsPlugin;
-use strum::{EnumIter, IntoEnumIterator};
+use strum::{Display, EnumIter, IntoEnumIterator};
 
 mod assets;
 
@@ -46,7 +47,11 @@ fn main() {
         .add_system_set(SystemSet::on_enter(GameState::MainMenu))
         .add_system_set(SystemSet::on_update(GameState::MainMenu).with_system(main_menu))
         .add_system_set(SystemSet::on_exit(GameState::MainMenu))
-        .add_system_set(SystemSet::on_enter(GameState::Game).with_system(spawn_board))
+        .add_system_set(
+            SystemSet::on_enter(GameState::Game)
+                .with_system(spawn_board)
+                .with_system(setup_resources),
+        )
         .add_system_set(
             SystemSet::on_update(GameState::Game)
                 .with_system(gem_events)
@@ -144,13 +149,14 @@ fn gem_events(
     mut board_commands: ResMut<BoardCommands>,
     gltf_assets: Res<Assets<Gltf>>,
     assets: Res<GemAssets>,
-    gems: Query<(&Transform, Option<&Animator<Transform>>, Entity), With<GemType>>,
+    gems: Query<(&Transform, Option<&Animator<Transform>>, Entity, &GemType)>,
     mut slots: Query<(&Transform, &mut GemSlot)>,
+    mut resources: Query<&mut Resources, With<Player>>,
 ) {
     // Only read new events if we're done moving gems around
     for (animator, entity) in gems
         .iter()
-        .filter_map(|(_, animator, entity)| animator.map(|animator| (animator, entity)))
+        .filter_map(|(_, animator, entity, _)| animator.map(|animator| (animator, entity)))
     {
         if animator.progress() != 1.0 {
             return;
@@ -279,7 +285,10 @@ fn gem_events(
             BoardEvent::Popped(pop) => {
                 info!("Popped {pop}");
                 let mut slot = slots.iter_mut().find(|slot| slot.1.pos == pop).unwrap().1;
-                commands.entity(slot.gem.unwrap()).despawn_recursive();
+                let gem = slot.gem.unwrap();
+                let typ = gems.get_component::<GemType>(gem).unwrap();
+                resources.single_mut().add(typ);
+                commands.entity(gem).despawn_recursive();
                 slot.gem = None;
             }
             BoardEvent::Spawned(spawns) => {
@@ -400,7 +409,7 @@ enum GameState {
 }
 
 #[repr(u8)]
-#[derive(Component, Clone, Copy, EnumIter)]
+#[derive(Component, Clone, Copy, EnumIter, Display, Eq, Hash, PartialEq)]
 enum GemType {
     Ruby,
     Emerald,
@@ -603,8 +612,13 @@ fn animate_selected(
 #[derive(Deref, DerefMut, Clone, Copy)]
 struct SelectedSlot(Option<Entity>);
 
-fn left_sidebar(mut egui_ctx: ResMut<EguiContext>, windows: Res<Windows>) {
+fn left_sidebar(
+    mut egui_ctx: ResMut<EguiContext>,
+    windows: Res<Windows>,
+    resources: Query<&Resources, With<Player>>,
+) {
     let window = windows.primary();
+    let resources = resources.single();
     egui::SidePanel::left("Player panel")
         .resizable(false)
         .show(egui_ctx.ctx_mut(), |ui| {
@@ -613,7 +627,22 @@ fn left_sidebar(mut egui_ctx: ResMut<EguiContext>, windows: Res<Windows>) {
                 egui::Layout::default().with_cross_align(egui::Align::Center),
                 |ui| {
                     ui.heading(RichText::new("Player").font(FontId::monospace(50.0)));
-                    ui.label("Some stuff");
+                    ui.separator();
+                    for typ in GemType::iter() {
+                        ui.label(format!(
+                            "{typ}: {}",
+                            resources.mana.get(&typ).copied().unwrap_or_default()
+                        ));
+                    }
+                    ui.separator();
+                    if ui
+                        .add_enabled(false, egui::Button::new(RichText::new("Bonk: 3equipment")))
+                        .clicked()
+                    {}
+                    if ui
+                        .add_enabled(false, egui::Button::new(RichText::new("Heal: 3amethyst")))
+                        .clicked()
+                    {}
                 },
             );
         });
@@ -633,4 +662,26 @@ fn right_sidebar(mut egui_ctx: ResMut<EguiContext>, windows: Res<Windows>) {
                 },
             );
         });
+}
+
+#[derive(Component, Default)]
+struct Resources {
+    mana: HashMap<GemType, u32>,
+}
+
+impl Resources {
+    fn add(&mut self, typ: &GemType) {
+        self.mana
+            .insert(*typ, self.mana.get(typ).copied().unwrap_or_default() + 1);
+    }
+}
+
+#[derive(Component)]
+struct Player;
+
+fn setup_resources(mut commands: Commands) {
+    // Player resources
+    commands.spawn_bundle((Player, Resources::default()));
+    // Opponent resources
+    commands.spawn_bundle((Resources::default(),));
 }
