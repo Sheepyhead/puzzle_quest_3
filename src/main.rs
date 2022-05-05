@@ -30,7 +30,7 @@ fn main() {
         })
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugin(EguiPlugin)
-        .add_plugin(WorldInspectorPlugin::default())
+        // .add_plugin(WorldInspectorPlugin::default())
         .add_plugin(PhysicsPlugin::default())
         .add_plugin(DefaultRaycastingPlugin::<RaycastSet>::default())
         .add_plugin(TweeningPlugin)
@@ -51,8 +51,10 @@ fn main() {
             SystemSet::on_update(GameState::Game)
                 .with_system(gem_events)
                 .with_system(update_raycast_with_cursor)
-                .with_system(select)
-                .with_system(animate_selected),
+                .with_system(select.after(gem_events))
+                .with_system(animate_selected)
+                .with_system(left_sidebar)
+                .with_system(right_sidebar),
         )
         .add_system_set(SystemSet::on_exit(GameState::Game))
         .run()
@@ -76,7 +78,7 @@ fn main_menu(
         ui.with_layout(
             egui::Layout::default().with_cross_align(egui::Align::Center),
             |ui| {
-                ui.heading(RichText::new("UNNAMED MATCH 3 RPG").font(FontId::monospace(100.0)));
+                ui.heading(RichText::new("UNTITLED MATCH 3 RPG").font(FontId::monospace(100.0)));
                 if ui
                     .button(RichText::new("Start").font(FontId::monospace(50.0)))
                     .clicked()
@@ -600,3 +602,35 @@ fn animate_selected(
 
 #[derive(Deref, DerefMut, Clone, Copy)]
 struct SelectedSlot(Option<Entity>);
+
+fn left_sidebar(mut egui_ctx: ResMut<EguiContext>, windows: Res<Windows>) {
+    let window = windows.primary();
+    egui::SidePanel::left("Player panel")
+        .resizable(false)
+        .show(egui_ctx.ctx_mut(), |ui| {
+            ui.set_width(window.width() / 4.0);
+            ui.with_layout(
+                egui::Layout::default().with_cross_align(egui::Align::Center),
+                |ui| {
+                    ui.heading(RichText::new("Player").font(FontId::monospace(50.0)));
+                    ui.label("Some stuff");
+                },
+            );
+        });
+}
+
+fn right_sidebar(mut egui_ctx: ResMut<EguiContext>, windows: Res<Windows>) {
+    let window = windows.primary();
+    egui::SidePanel::right("Opponent panel")
+        .resizable(false)
+        .show(egui_ctx.ctx_mut(), |ui| {
+            ui.set_width(window.width() / 4.0);
+            ui.with_layout(
+                egui::Layout::default().with_cross_align(egui::Align::Center),
+                |ui| {
+                    ui.heading(RichText::new("Opponent").font(FontId::monospace(50.0)));
+                    ui.label("Some stuff");
+                },
+            );
+        });
+}
