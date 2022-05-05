@@ -10,7 +10,6 @@ use bevy_egui::{
     egui::{self, FontId, RichText},
     EguiContext, EguiPlugin,
 };
-use bevy_inspector_egui::WorldInspectorPlugin;
 use bevy_match3::{prelude::*, Match3Config};
 use bevy_mod_raycast::{DefaultRaycastingPlugin, RayCastMesh, RayCastMethod, RayCastSource};
 use bevy_tweening::{
@@ -44,6 +43,7 @@ fn main() {
         .add_startup_system(setup)
         .add_startup_system(load_assets)
         .add_system(apply_material)
+        .add_event::<Skill>()
         .add_system_set(SystemSet::on_enter(GameState::MainMenu))
         .add_system_set(SystemSet::on_update(GameState::MainMenu).with_system(main_menu))
         .add_system_set(SystemSet::on_exit(GameState::MainMenu))
@@ -56,10 +56,11 @@ fn main() {
             SystemSet::on_update(GameState::Game)
                 .with_system(gem_events)
                 .with_system(update_raycast_with_cursor)
-                .with_system(select.after(gem_events))
+                .with_system(select)
                 .with_system(animate_selected)
                 .with_system(left_sidebar)
-                .with_system(right_sidebar),
+                .with_system(right_sidebar)
+                .with_system(skills),
         )
         .add_system_set(SystemSet::on_exit(GameState::Game))
         .run()
@@ -613,12 +614,13 @@ fn animate_selected(
 struct SelectedSlot(Option<Entity>);
 
 fn left_sidebar(
+    mut skills: EventWriter<Skill>,
     mut egui_ctx: ResMut<EguiContext>,
     windows: Res<Windows>,
-    resources: Query<&Resources, With<Player>>,
+    resources: Query<(Entity, &Resources), With<Player>>,
 ) {
     let window = windows.primary();
-    let resources = resources.single();
+    let (player, resources) = resources.single();
     egui::SidePanel::left("Player panel")
         .resizable(false)
         .show(egui_ctx.ctx_mut(), |ui| {
@@ -636,13 +638,39 @@ fn left_sidebar(
                     }
                     ui.separator();
                     if ui
-                        .add_enabled(false, egui::Button::new(RichText::new("Bonk: 3equipment")))
+                        .add_enabled(
+                            resources
+                                .mana
+                                .get(&GemType::Equipment)
+                                .copied()
+                                .unwrap_or_default()
+                                >= 3,
+                            egui::Button::new(RichText::new("Bonk: 3equipment")),
+                        )
                         .clicked()
-                    {}
+                    {
+                        skills.send(Skill {
+                            typ: SkillType::Bash,
+                            source: player,
+                        });
+                    }
                     if ui
-                        .add_enabled(false, egui::Button::new(RichText::new("Heal: 3amethyst")))
+                        .add_enabled(
+                            resources
+                                .mana
+                                .get(&GemType::Amethyst)
+                                .copied()
+                                .unwrap_or_default()
+                                >= 3,
+                            egui::Button::new(RichText::new("Heal: 3amethyst")),
+                        )
                         .clicked()
-                    {}
+                    {
+                        skills.send(Skill {
+                            typ: SkillType::Heal,
+                            source: player,
+                        });
+                    }
                 },
             );
         });
@@ -674,6 +702,16 @@ impl Resources {
         self.mana
             .insert(*typ, self.mana.get(typ).copied().unwrap_or_default() + 1);
     }
+
+    fn pay(&mut self, typ: &GemType, amount: u32) -> bool {
+        let mana = self.mana.get(typ).copied().unwrap_or_default();
+        if mana >= amount {
+            self.mana.insert(*typ, mana - amount);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Component)]
@@ -684,4 +722,33 @@ fn setup_resources(mut commands: Commands) {
     commands.spawn_bundle((Player, Resources::default()));
     // Opponent resources
     commands.spawn_bundle((Resources::default(),));
+}
+
+struct Skill {
+    typ: SkillType,
+    source: Entity,
+}
+
+enum SkillType {
+    Bash,
+    Heal,
+}
+
+fn skills(mut skills: EventReader<Skill>, mut users: Query<&mut Resources>) {
+    for skill in skills.iter() {
+        match skill.typ {
+            SkillType::Bash => {
+                info!("{:?} did a heckin bash", skill.source);
+                if let Ok(mut resources) = users.get_mut(skill.source) {
+                    resources.pay(&GemType::Equipment, 3);
+                }
+            }
+            SkillType::Heal => {
+                info!("{:?} did a healz", skill.source);
+                if let Ok(mut resources) = users.get_mut(skill.source) {
+                    resources.pay(&GemType::Amethyst, 3);
+                }
+            }
+        }
+    }
 }
