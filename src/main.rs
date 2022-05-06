@@ -40,6 +40,7 @@ fn main() {
         })
         .add_plugin(Match3Plugin)
         .add_state(GameState::MainMenu)
+        .add_state(TurnState::AwaitingMove)
         .add_startup_system(setup)
         .add_startup_system(load_assets)
         .add_system(apply_material)
@@ -57,10 +58,11 @@ fn main() {
                 .with_system(gem_events)
                 .with_system(update_raycast_with_cursor)
                 .with_system(select)
-                .with_system(animate_selected)
+                .with_system(animate_selected.before(gem_events))
                 .with_system(left_sidebar)
                 .with_system(right_sidebar)
-                .with_system(skills),
+                .with_system(skills)
+                .with_system(turn_switched),
         )
         .add_system_set(SystemSet::on_exit(GameState::Game))
         .run()
@@ -150,9 +152,13 @@ fn gem_events(
     mut board_commands: ResMut<BoardCommands>,
     gltf_assets: Res<Assets<Gltf>>,
     assets: Res<GemAssets>,
+    mut turn_state: ResMut<State<TurnState>>,
+    mut turn: ResMut<Turn>,
+    mut just_spawned: Local<bool>,
     gems: Query<(&Transform, Option<&Animator<Transform>>, Entity, &GemType)>,
     mut slots: Query<(&Transform, &mut GemSlot)>,
-    mut resources: Query<&mut Resources, With<Player>>,
+    mut player: Query<(Entity, &mut Resources), With<Player>>,
+    opponent: Query<Entity, (Without<Player>, With<Resources>)>,
 ) {
     // Only read new events if we're done moving gems around
     for (animator, entity) in gems
@@ -166,7 +172,8 @@ fn gem_events(
         }
     }
 
-    if let Ok(event) = events.pop() {
+    while let Ok(event) = events.pop() {
+        *just_spawned = false;
         match event {
             BoardEvent::Swapped(from, to) => {
                 info!("Swapped from {from} to {to}");
@@ -255,6 +262,7 @@ fn gem_events(
                         },
                     )),
                 ));
+                turn_state.set(TurnState::AwaitingMove).unwrap();
             }
             BoardEvent::Dropped(drops) => {
                 info!("Dropped {drops:?}");
@@ -288,7 +296,7 @@ fn gem_events(
                 let mut slot = slots.iter_mut().find(|slot| slot.1.pos == pop).unwrap().1;
                 let gem = slot.gem.unwrap();
                 let typ = gems.get_component::<GemType>(gem).unwrap();
-                resources.single_mut().add(typ);
+                player.single_mut().1.add(typ);
                 commands.entity(gem).despawn_recursive();
                 slot.gem = None;
             }
@@ -314,6 +322,7 @@ fn gem_events(
 
                     slot.gem = Some(gem);
                 }
+                *just_spawned = true;
             }
             BoardEvent::Matched(matches) => {
                 info!("Matched {:?}", matches.without_duplicates());
@@ -323,6 +332,19 @@ fn gem_events(
                     ))
                     .unwrap();
             }
+        }
+    }
+
+    if *just_spawned {
+        // We spawned gems and no further matches happened, so time to change turns
+        turn_state.set(TurnState::AwaitingMove).unwrap();
+        *just_spawned = false;
+        let (player, _) = player.single();
+        let opponent = opponent.single();
+        if **turn == player {
+            **turn = opponent;
+        } else {
+            **turn = player;
         }
     }
 }
@@ -456,11 +478,14 @@ fn select(
     mouse_buttons: Res<Input<MouseButton>>,
     mut selected: ResMut<SelectedSlot>,
     mut board_commands: ResMut<BoardCommands>,
+    mut turn_state: ResMut<State<TurnState>>,
     from: Query<&RayCastSource<RaycastSet>>,
     to: Query<&GemSlot>,
     gems: Query<(&Animator<Transform>, Entity), With<GemType>>,
 ) {
-    if !mouse_buttons.just_pressed(MouseButton::Left) {
+    if !mouse_buttons.just_pressed(MouseButton::Left)
+        || matches!(turn_state.current(), TurnState::Resolving)
+    {
         return;
     }
     // Only allow selection if no gems (other than currently selected gem) are moving
@@ -518,6 +543,8 @@ fn select(
                         hit_slot.pos,
                     ))
                     .unwrap();
+
+                turn_state.set(TurnState::Resolving).unwrap();
             }
             **selected = None;
         } else {
@@ -617,6 +644,7 @@ fn left_sidebar(
     mut skills: EventWriter<Skill>,
     mut egui_ctx: ResMut<EguiContext>,
     windows: Res<Windows>,
+    turn: Res<Turn>,
     resources: Query<(Entity, &Resources), With<Player>>,
 ) {
     let window = windows.primary();
@@ -624,6 +652,7 @@ fn left_sidebar(
     egui::SidePanel::left("Player panel")
         .resizable(false)
         .show(egui_ctx.ctx_mut(), |ui| {
+            ui.set_enabled(**turn == player);
             ui.set_width(window.width() / 4.0);
             ui.with_layout(
                 egui::Layout::default().with_cross_align(egui::Align::Center),
@@ -676,11 +705,18 @@ fn left_sidebar(
         });
 }
 
-fn right_sidebar(mut egui_ctx: ResMut<EguiContext>, windows: Res<Windows>) {
+fn right_sidebar(
+    mut egui_ctx: ResMut<EguiContext>,
+    windows: Res<Windows>,
+    turn: Res<Turn>,
+    opponent: Query<Entity, (With<Resources>, Without<Player>)>,
+) {
     let window = windows.primary();
+    let opponent = opponent.single();
     egui::SidePanel::right("Opponent panel")
         .resizable(false)
         .show(egui_ctx.ctx_mut(), |ui| {
+            ui.set_enabled(**turn == opponent);
             ui.set_width(window.width() / 4.0);
             ui.with_layout(
                 egui::Layout::default().with_cross_align(egui::Align::Center),
@@ -719,9 +755,11 @@ struct Player;
 
 fn setup_resources(mut commands: Commands) {
     // Player resources
-    commands.spawn_bundle((Player, Resources::default()));
+    let player = commands.spawn_bundle((Player, Resources::default())).id();
     // Opponent resources
     commands.spawn_bundle((Resources::default(),));
+
+    determine_starter(&mut commands, player);
 }
 
 struct Skill {
@@ -750,5 +788,25 @@ fn skills(mut skills: EventReader<Skill>, mut users: Query<&mut Resources>) {
                 }
             }
         }
+    }
+}
+
+// Resource containing the entity whose turn it is
+#[derive(DerefMut, Deref)]
+struct Turn(Entity);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+enum TurnState {
+    AwaitingMove,
+    Resolving,
+}
+
+fn determine_starter(commands: &mut Commands, starter: Entity) {
+    commands.insert_resource(Turn(starter));
+}
+
+fn turn_switched(turn: Res<Turn>) {
+    if turn.is_changed() {
+        info!("Turn changed to {:?}", **turn);
     }
 }
