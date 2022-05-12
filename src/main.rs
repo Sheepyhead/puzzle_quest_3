@@ -154,7 +154,7 @@ fn gem_events(
     assets: Res<GemAssets>,
     mut turn_state: ResMut<State<TurnState>>,
     mut turn: ResMut<Turn>,
-    mut just_spawned: Local<bool>,
+    mut change_turns: Local<bool>,
     gems: Query<(&Transform, Option<&Animator<Transform>>, Entity, &GemType)>,
     mut slots: Query<(&Transform, &mut GemSlot)>,
     mut player: Query<(Entity, &mut Resources), With<Player>>,
@@ -173,7 +173,7 @@ fn gem_events(
     }
 
     while let Ok(event) = events.pop() {
-        *just_spawned = false;
+        *change_turns = false;
         match event {
             BoardEvent::Swapped(from, to) => {
                 info!("Swapped from {from} to {to}");
@@ -322,7 +322,7 @@ fn gem_events(
 
                     slot.gem = Some(gem);
                 }
-                *just_spawned = true;
+                *change_turns = true;
             }
             BoardEvent::Matched(matches) => {
                 info!("Matched {:?}", matches.without_duplicates());
@@ -332,13 +332,44 @@ fn gem_events(
                     ))
                     .unwrap();
             }
+            BoardEvent::Shuffled(moves) => {
+                let mut old_slots = HashMap::new();
+                for (_, slot) in slots.iter() {
+                    old_slots.insert(slot.pos, *slot);
+                }
+                let mut new_slots = HashMap::new();
+                for (from, to) in moves {
+                    let from_slot = old_slots.get(&from).unwrap();
+                    let to_slot = old_slots.get(&to).unwrap();
+
+                    new_slots.insert(to, from_slot.gem);
+                    if let (Some(from_gem), Some(to_gem)) = (from_slot.gem, to_slot.gem) {
+                        let from_transform = gems.get_component::<Transform>(from_gem).unwrap();
+                        let to_transform = gems.get_component::<Transform>(to_gem).unwrap();
+
+                        commands.entity(from_gem).insert(Animator::new(Tween::new(
+                            EaseFunction::QuadraticInOut,
+                            TweeningType::Once,
+                            Duration::from_secs_f32(0.5),
+                            TransformPositionLens {
+                                start: from_transform.translation,
+                                end: to_transform.translation,
+                            },
+                        )));
+                    }
+                }
+                for (_, mut slot) in slots.iter_mut() {
+                    let new_gem = new_slots.get(&slot.pos).copied().flatten();
+                    slot.gem = new_gem;
+                }
+                *change_turns = true;
+            }
         }
     }
 
-    if *just_spawned {
-        // We spawned gems and no further matches happened, so time to change turns
+    if *change_turns {
         turn_state.set(TurnState::AwaitingMove).unwrap();
-        *just_spawned = false;
+        *change_turns = false;
         let (player, _) = player.single();
         let opponent = opponent.single();
         if **turn == player {
@@ -667,19 +698,11 @@ fn left_sidebar(
                     }
                     ui.separator();
                     if ui
-                        .add_enabled(
-                            resources
-                                .mana
-                                .get(&GemType::Equipment)
-                                .copied()
-                                .unwrap_or_default()
-                                >= 3,
-                            egui::Button::new(RichText::new("Bonk: 3equipment")),
-                        )
+                        .add(egui::Button::new(RichText::new("Bamboozle: free")))
                         .clicked()
                     {
                         skills.send(Skill {
-                            typ: SkillType::Bash,
+                            typ: SkillType::Bamboozle,
                             source: player,
                         });
                     }
@@ -768,17 +791,23 @@ struct Skill {
 }
 
 enum SkillType {
-    Bash,
+    Bamboozle,
     Heal,
 }
 
-fn skills(mut skills: EventReader<Skill>, mut users: Query<&mut Resources>) {
+fn skills(
+    mut board_commands: ResMut<BoardCommands>,
+    mut state: ResMut<State<TurnState>>,
+    mut skills: EventReader<Skill>,
+    mut users: Query<&mut Resources>,
+) {
     for skill in skills.iter() {
         match skill.typ {
-            SkillType::Bash => {
-                info!("{:?} did a heckin bash", skill.source);
-                if let Ok(mut resources) = users.get_mut(skill.source) {
-                    resources.pay(&GemType::Equipment, 3);
+            SkillType::Bamboozle => {
+                info!("{:?} did a heckin bamboozle", skill.source);
+                if users.get_mut(skill.source).is_ok() {
+                    board_commands.push(BoardCommand::Shuffle).unwrap();
+                    state.set(TurnState::Resolving).unwrap();
                 }
             }
             SkillType::Heal => {

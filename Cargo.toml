@@ -12,7 +12,7 @@ bevy_hanabi = "0.2.0"
 bevy_egui = "0.13.0"
 bevy-inspector-egui = "0.10.0"
 strum = { version = "0.24.0", features = ["derive"] }
-bevy_match3 = "0.0.2"
+bevy_match3 = { git = "https://github.com/Sheepyhead/bevy_match3" }
 bevy_mod_raycast = "0.4.0"
 bevy_tweening = "0.4"
 
