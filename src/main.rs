@@ -154,11 +154,12 @@ fn gem_events(
     assets: Res<GemAssets>,
     mut turn_state: ResMut<State<TurnState>>,
     mut turn: ResMut<Turn>,
-    mut change_turns: Local<bool>,
+    mut end_of_sequence: Local<bool>,
+    mut change_turns_at_end_of_sequence: Local<bool>,
     gems: Query<(&Transform, Option<&Animator<Transform>>, Entity, &GemType)>,
     mut slots: Query<(&Transform, &mut GemSlot)>,
     mut player: Query<(Entity, &mut Resources), With<Player>>,
-    opponent: Query<Entity, (Without<Player>, With<Resources>)>,
+    mut opponent: Query<(Entity, &mut Resources), Without<Player>>,
 ) {
     // Only read new events if we're done moving gems around
     for (animator, entity) in gems
@@ -173,7 +174,7 @@ fn gem_events(
     }
 
     while let Ok(event) = events.pop() {
-        *change_turns = false;
+        *end_of_sequence = false;
         match event {
             BoardEvent::Swapped(from, to) => {
                 info!("Swapped from {from} to {to}");
@@ -212,6 +213,7 @@ fn gem_events(
                         end: from_transform.translation,
                     },
                 )));
+                *change_turns_at_end_of_sequence = true;
             }
             BoardEvent::FailedSwap(from, to) => {
                 info!("Failed to swap from {from} to {to}");
@@ -293,10 +295,15 @@ fn gem_events(
             }
             BoardEvent::Popped(pop) => {
                 info!("Popped {pop}");
+                let mut current_resource = player
+                    .get_mut(turn.0)
+                    .map(|(_, resources)| resources)
+                    .or_else(|_| opponent.get_mut(turn.0).map(|(_, resources)| resources))
+                    .unwrap();
                 let mut slot = slots.iter_mut().find(|slot| slot.1.pos == pop).unwrap().1;
                 let gem = slot.gem.unwrap();
                 let typ = gems.get_component::<GemType>(gem).unwrap();
-                player.single_mut().1.add(typ);
+                current_resource.add(typ);
                 commands.entity(gem).despawn_recursive();
                 slot.gem = None;
             }
@@ -322,7 +329,7 @@ fn gem_events(
 
                     slot.gem = Some(gem);
                 }
-                *change_turns = true;
+                *end_of_sequence = true;
             }
             BoardEvent::Matched(matches) => {
                 info!("Matched {:?}", matches.without_duplicates());
@@ -362,20 +369,24 @@ fn gem_events(
                     let new_gem = new_slots.get(&slot.pos).copied().flatten();
                     slot.gem = new_gem;
                 }
-                *change_turns = true;
+                *end_of_sequence = true;
             }
         }
     }
 
-    if *change_turns {
+    if *end_of_sequence {
         turn_state.set(TurnState::AwaitingMove).unwrap();
-        *change_turns = false;
-        let (player, _) = player.single();
-        let opponent = opponent.single();
-        if **turn == player {
-            **turn = opponent;
-        } else {
-            **turn = player;
+        *end_of_sequence = false;
+        if *change_turns_at_end_of_sequence {
+            *change_turns_at_end_of_sequence = false;
+
+            let (player, _) = player.single();
+            let (opponent, _) = opponent.single();
+            if **turn == player {
+                **turn = opponent;
+            } else {
+                **turn = player;
+            }
         }
     }
 }
@@ -771,6 +782,10 @@ impl Resources {
             false
         }
     }
+
+    fn clear(&mut self) {
+        self.mana.clear();
+    }
 }
 
 #[derive(Component)]
@@ -834,8 +849,19 @@ fn determine_starter(commands: &mut Commands, starter: Entity) {
     commands.insert_resource(Turn(starter));
 }
 
-fn turn_switched(turn: Res<Turn>) {
+fn turn_switched(
+    turn: Res<Turn>,
+    board: Res<Board>,
+    mut board_commands: ResMut<BoardCommands>,
+    mut resources: Query<&mut Resources>,
+) {
     if turn.is_changed() {
         info!("Turn changed to {:?}", **turn);
+        if board.get_matching_moves().is_empty() {
+            for mut resource in resources.iter_mut() {
+                resource.clear();
+            }
+            board_commands.push(BoardCommand::Shuffle).unwrap();
+        }
     }
 }
