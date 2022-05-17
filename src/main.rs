@@ -62,7 +62,8 @@ fn main() {
                 .with_system(left_sidebar)
                 .with_system(right_sidebar)
                 .with_system(skills)
-                .with_system(turn_switched),
+                .with_system(turn_switched)
+                .with_system(opponent_ai),
         )
         .add_system_set(SystemSet::on_exit(GameState::Game))
         .run()
@@ -685,7 +686,7 @@ struct SelectedSlot(Option<Entity>);
 fn left_sidebar(
     mut skills: EventWriter<Skill>,
     mut egui_ctx: ResMut<EguiContext>,
-    state: ResMut<State<TurnState>>,
+    state: Res<State<TurnState>>,
     windows: Res<Windows>,
     turn: Res<Turn>,
     resources: Query<(Entity, &Resources), With<Player>>,
@@ -757,7 +758,6 @@ fn right_sidebar(
                 egui::Layout::default().with_cross_align(egui::Align::Center),
                 |ui| {
                     ui.heading(RichText::new("Opponent").font(FontId::monospace(50.0)));
-                    ui.label("Some stuff");
                 },
             );
         });
@@ -855,9 +855,17 @@ fn turn_switched(
     board: Res<Board>,
     mut board_commands: ResMut<BoardCommands>,
     mut resources: Query<&mut Resources>,
+    player: Query<(), With<Player>>,
 ) {
     if turn.is_changed() {
-        info!("Turn changed to {:?}", **turn);
+        info!(
+            "Turn changed to {:?}",
+            if player.get(**turn).is_ok() {
+                "player"
+            } else {
+                "opponent"
+            }
+        );
         if board.get_matching_moves().is_empty() {
             for mut resource in resources.iter_mut() {
                 resource.clear();
@@ -865,4 +873,24 @@ fn turn_switched(
             board_commands.push(BoardCommand::Shuffle).unwrap();
         }
     }
+}
+
+fn opponent_ai(
+    turn: Res<Turn>,
+    mut turn_state: ResMut<State<TurnState>>,
+    board: Res<Board>,
+    mut board_commands: ResMut<BoardCommands>,
+    opponent: Query<(), (With<Resources>, Without<Player>)>,
+) {
+    if opponent.get(turn.0).is_err() || turn_state.current() == &TurnState::Resolving {
+        return;
+    }
+    let possible_matches = board.get_matching_moves();
+    let matching_moves = possible_matches.iter().collect::<Vec<_>>();
+    let choice = fastrand::usize(..matching_moves.len());
+    let choice = matching_moves.get(choice).unwrap();
+    board_commands
+        .push(BoardCommand::Swap(choice.0, choice.1))
+        .unwrap();
+    turn_state.set(TurnState::Resolving).unwrap();
 }
