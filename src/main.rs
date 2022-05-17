@@ -685,6 +685,7 @@ struct SelectedSlot(Option<Entity>);
 fn left_sidebar(
     mut skills: EventWriter<Skill>,
     mut egui_ctx: ResMut<EguiContext>,
+    state: ResMut<State<TurnState>>,
     windows: Res<Windows>,
     turn: Res<Turn>,
     resources: Query<(Entity, &Resources), With<Player>>,
@@ -694,7 +695,7 @@ fn left_sidebar(
     egui::SidePanel::left("Player panel")
         .resizable(false)
         .show(egui_ctx.ctx_mut(), |ui| {
-            ui.set_enabled(**turn == player);
+            ui.set_enabled((**turn == player) && (state.current() == &TurnState::AwaitingMove));
             ui.set_width(window.width() / 4.0);
             ui.with_layout(
                 egui::Layout::default().with_cross_align(egui::Align::Center),
