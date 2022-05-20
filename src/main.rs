@@ -10,6 +10,7 @@ use bevy_egui::{
     egui::{self, FontId, RichText},
     EguiContext, EguiPlugin,
 };
+use bevy_inspector_egui::egui::{Color32, ProgressBar};
 use bevy_match3::{prelude::*, Match3Config};
 use bevy_mod_raycast::{DefaultRaycastingPlugin, RayCastMesh, RayCastMethod, RayCastSource};
 use bevy_tweening::{
@@ -487,6 +488,36 @@ enum GemType {
     Equipment,
 }
 
+impl From<GemType> for Color {
+    fn from(typ: GemType) -> Self {
+        match typ {
+            GemType::Ruby => Color::RED,
+            GemType::Emerald => Color::GREEN,
+            GemType::Sapphire => Color::BLUE,
+            GemType::Topaz => Color::YELLOW,
+            GemType::Diamond => Color::WHITE,
+            GemType::Amethyst => Color::PURPLE,
+            GemType::Skull => Color::ANTIQUE_WHITE,
+            GemType::Equipment => Color::GRAY,
+        }
+    }
+}
+
+impl From<GemType> for Color32 {
+    fn from(typ: GemType) -> Self {
+        match typ {
+            GemType::Ruby => Color32::RED,
+            GemType::Emerald => Color32::GREEN,
+            GemType::Sapphire => Color32::BLUE,
+            GemType::Topaz => Color32::YELLOW,
+            GemType::Diamond => Color32::WHITE,
+            GemType::Amethyst => Color32::from_rgb(127, 0, 127),
+            GemType::Skull => Color32::WHITE,
+            GemType::Equipment => Color32::GRAY,
+        }
+    }
+}
+
 impl From<u8> for GemType {
     fn from(val: u8) -> Self {
         GemType::iter()
@@ -703,12 +734,7 @@ fn left_sidebar(
                 |ui| {
                     ui.heading(RichText::new("Player").font(FontId::monospace(50.0)));
                     ui.separator();
-                    for typ in GemType::iter() {
-                        ui.label(format!(
-                            "{typ}: {}",
-                            resources.mana.get(&typ).copied().unwrap_or_default()
-                        ));
-                    }
+                    ui.add(resources);
                     ui.separator();
                     if ui
                         .add(egui::Button::new(RichText::new("Bamboozle: free")))
@@ -745,10 +771,10 @@ fn right_sidebar(
     mut egui_ctx: ResMut<EguiContext>,
     windows: Res<Windows>,
     turn: Res<Turn>,
-    opponent: Query<Entity, (With<Resources>, Without<Player>)>,
+    opponent: Query<(Entity, &Resources), Without<Player>>,
 ) {
     let window = windows.primary();
-    let opponent = opponent.single();
+    let (opponent, resources) = opponent.single();
     egui::SidePanel::right("Opponent panel")
         .resizable(false)
         .show(egui_ctx.ctx_mut(), |ui| {
@@ -758,6 +784,8 @@ fn right_sidebar(
                 egui::Layout::default().with_cross_align(egui::Align::Center),
                 |ui| {
                     ui.heading(RichText::new("Opponent").font(FontId::monospace(50.0)));
+                    ui.separator();
+                    ui.add(resources);
                 },
             );
         });
@@ -770,11 +798,17 @@ struct Resources {
 
 impl Resources {
     fn add(&mut self, typ: &GemType) {
+        if *typ == GemType::Skull {
+            return;
+        }
         self.mana
             .insert(*typ, self.mana.get(typ).copied().unwrap_or_default() + 1);
     }
 
     fn pay(&mut self, typ: &GemType, amount: u32) -> bool {
+        if *typ == GemType::Skull {
+            unimplemented!("Skulls are not a resource");
+        }
         let mana = self.mana.get(typ).copied().unwrap_or_default();
         if mana >= amount {
             self.mana.insert(*typ, mana - amount);
@@ -786,6 +820,25 @@ impl Resources {
 
     fn clear(&mut self) {
         self.mana.clear();
+    }
+}
+
+impl egui::Widget for &Resources {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        ui.group(|ui| {
+            for typ in GemType::iter() {
+                if typ == GemType::Skull {
+                    continue;
+                }
+                let amount = self.mana.get(&typ).unwrap_or(&0);
+                ui.horizontal(|ui| {
+                    ui.visuals_mut().selection.bg_fill = typ.into();
+                    ui.colored_label(typ, format!("{amount}"));
+                    ui.add(ProgressBar::new(*amount as f32 / 20.0));
+                });
+            }
+        })
+        .response
     }
 }
 
