@@ -1,5 +1,17 @@
-#![allow(clippy::type_complexity)]
-#![allow(clippy::too_many_arguments)]
+#![deny(clippy::all)]
+#![warn(clippy::pedantic, clippy::cargo)]
+#![allow(
+    clippy::module_name_repetitions,
+    clippy::cargo_common_metadata,
+    clippy::type_complexity,
+    clippy::too_many_arguments,
+    clippy::needless_pass_by_value,
+    clippy::multiple_crate_versions,
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::too_many_lines,
+    clippy::similar_names
+)]
 #![feature(is_some_with)]
 
 use std::time::Duration;
@@ -14,7 +26,8 @@ use bevy_inspector_egui::egui::{Color32, ProgressBar};
 use bevy_match3::{prelude::*, Match3Config};
 use bevy_mod_raycast::{DefaultRaycastingPlugin, RayCastMesh, RayCastMethod, RayCastSource};
 use bevy_tweening::{
-    lens::*, Animator, EaseFunction, EaseMethod, Tween, TweeningPlugin, TweeningType,
+    lens::{TransformPositionLens, TransformRotateZLens},
+    Animator, EaseFunction, EaseMethod, Tween, TweeningPlugin, TweeningType,
 };
 use heron::PhysicsPlugin;
 use strum::{Display, EnumIter, IntoEnumIterator};
@@ -67,7 +80,7 @@ fn main() {
                 .with_system(opponent_ai),
         )
         .add_system_set(SystemSet::on_exit(GameState::Game))
-        .run()
+        .run();
 }
 
 fn setup(mut commands: Commands) {
@@ -113,7 +126,7 @@ fn spawn_board(
     board: Res<Board>,
 ) {
     board.iter().for_each(|(pos, typ)| {
-        let translation = gem_pos_from(pos);
+        let translation = gem_pos_from(*pos);
 
         let gem = spawn_gem(
             &mut commands,
@@ -141,7 +154,7 @@ fn spawn_board(
     commands.insert_resource(SelectedSlot(None));
 }
 
-fn gem_pos_from(pos: &UVec2) -> Vec3 {
+fn gem_pos_from(pos: UVec2) -> Vec3 {
     let size = 0.2;
     let top = (size * 4.0) - (size / 2.0);
     let left = -(size * 4.0) + (size / 2.0);
@@ -168,10 +181,10 @@ fn gem_events(
         .iter()
         .filter_map(|(_, animator, entity, _)| animator.map(|animator| (animator, entity)))
     {
-        if animator.progress() != 1.0 {
-            return;
-        } else {
+        if approx_equal(animator.progress(), 1.0) {
             commands.entity(entity).remove::<Animator<Transform>>();
+        } else {
+            return;
         }
     }
 
@@ -305,7 +318,7 @@ fn gem_events(
                 let mut slot = slots.iter_mut().find(|slot| slot.1.pos == pop).unwrap().1;
                 let gem = slot.gem.unwrap();
                 let typ = gems.get_component::<GemType>(gem).unwrap();
-                current_resource.add(typ);
+                current_resource.add(*typ);
                 commands.entity(gem).despawn_recursive();
                 slot.gem = None;
             }
@@ -510,9 +523,8 @@ impl From<GemType> for Color32 {
             GemType::Emerald => Color32::GREEN,
             GemType::Sapphire => Color32::BLUE,
             GemType::Topaz => Color32::YELLOW,
-            GemType::Diamond => Color32::WHITE,
             GemType::Amethyst => Color32::from_rgb(127, 0, 127),
-            GemType::Skull => Color32::WHITE,
+            GemType::Diamond | GemType::Skull => Color32::WHITE,
             GemType::Equipment => Color32::GRAY,
         }
     }
@@ -575,13 +587,10 @@ fn select(
             continue;
         }
         // if gem is moving, return
-        else if animator.progress() != 1.0 {
+        if !approx_equal(animator.progress(), 1.0) {
             return;
         }
-        // gem has finished moving, remove animator
-        else {
-            commands.entity(entity).remove::<Animator<Transform>>();
-        }
+        commands.entity(entity).remove::<Animator<Transform>>();
     }
     for raycast_source in from.iter() {
         let (hit_entity, hit_slot) = match raycast_source
@@ -797,21 +806,21 @@ struct Resources {
 }
 
 impl Resources {
-    fn add(&mut self, typ: &GemType) {
-        if *typ == GemType::Skull {
+    fn add(&mut self, typ: GemType) {
+        if typ == GemType::Skull {
             return;
         }
         self.mana
-            .insert(*typ, self.mana.get(typ).copied().unwrap_or_default() + 1);
+            .insert(typ, self.mana.get(&typ).copied().unwrap_or_default() + 1);
     }
 
-    fn pay(&mut self, typ: &GemType, amount: u32) -> bool {
-        if *typ == GemType::Skull {
+    fn pay(&mut self, typ: GemType, amount: u32) -> bool {
+        if typ == GemType::Skull {
             unimplemented!("Skulls are not a resource");
         }
-        let mana = self.mana.get(typ).copied().unwrap_or_default();
+        let mana = self.mana.get(&typ).copied().unwrap_or_default();
         if mana >= amount {
-            self.mana.insert(*typ, mana - amount);
+            self.mana.insert(typ, mana - amount);
             true
         } else {
             false
@@ -882,7 +891,7 @@ fn skills(
             SkillType::Heal => {
                 info!("{:?} did a healz", skill.source);
                 if let Ok(mut resources) = users.get_mut(skill.source) {
-                    resources.pay(&GemType::Amethyst, 3);
+                    resources.pay(GemType::Amethyst, 3);
                 }
             }
         }
@@ -946,4 +955,9 @@ fn opponent_ai(
         .push(BoardCommand::Swap(choice.0, choice.1))
         .unwrap();
     turn_state.set(TurnState::Resolving).unwrap();
+}
+
+fn approx_equal(a: f32, b: f32) -> bool {
+    let margin = f32::EPSILON;
+    (a - b).abs() < margin
 }

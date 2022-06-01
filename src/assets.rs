@@ -20,11 +20,11 @@ pub enum GemShape {
 }
 
 impl GemShape {
-    pub fn mesh_path(&self) -> String {
+    pub fn mesh_path(self) -> String {
         format!("{self}.glb")
     }
 
-    pub fn shattered_mesh_path(&self) -> String {
+    pub fn shattered_mesh_path(self) -> String {
         format!("{self}_shattered.glb")
     }
 }
